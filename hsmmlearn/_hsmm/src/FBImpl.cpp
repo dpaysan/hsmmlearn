@@ -56,11 +56,15 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
     int i, j, k, t, u, v;
     double Observ, r, s, w;
 
+    ofstream output_file;
+    output_file.open("debug.txt");
+    output_file << "Running FB" << endl;
+    
     try {
         InitParaAndVar(CensoringPara, tauPara, JPara, MPara, dPara, pPara, piPara, pdfPara);
 
         CalcStoreD();
-
+	
         // forward recursion
         for (t = 0; t <= tau - 1; t++)
         {
@@ -136,6 +140,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
 
                 if (F[j][t] <= 0)
                 {
+  		    output_file << "F[j][t] = 0 for j = " << j << "t = " << t << endl;
                     throw var_nonpositive_exception();
                 }
             }
@@ -252,7 +257,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
                     w = 0;
                     s = 1;
                     for (t = tau - 2 - ind(!(RightCensoring)) * u; t >= 0; t--)
-                    {
+		      {
                         r = 0;
                         for (i = 0; i <= J - 1; i++)
                             if (i != j)  r += p[i][j] * F[i][t];
@@ -310,6 +315,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
     catch (var_nonpositive_exception e)
     {
         *err = 1;
+	output_file << "Handling exception, error code: " << *err << endl;
     }
     catch (memory_exception e)
     {
@@ -319,6 +325,8 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
     {
         *err = 3;
     }
+    output_file << "Error code: " << *err << endl;
+    output_file.close();
 
     freeMemory();
 }
