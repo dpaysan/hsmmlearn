@@ -107,6 +107,11 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
 		      }
 		    N[tau-1] += F[j][tau];
 		  }
+		if (F[j][t] <= 0)
+		  {
+		    output_file << "F[j][t] <= 0, namely " << F[j][t] << "for j = " << j << ", t = " << t << endl;
+		    throw var_nonpositive_exception();
+		  }
 	      }
 	    for (j = 0; j <= J-1; j++)
 	      {
@@ -203,7 +208,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
             }
 
             // Calculation xi
-	    output_file << "Calculating eta" << endl;
+	    output_file << "Calculating xi" << endl;
             for (j = 0; j <= J - 1; j++)
             {
                 for (u = 1; u <= M; u++)
