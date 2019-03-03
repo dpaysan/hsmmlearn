@@ -3,6 +3,9 @@ import numpy as np
 from .base import _viterbi_impl, _fb_impl
 from .emissions import GaussianEmissions, MultinomialEmissions
 from .properties import Durations, Emissions, TransitionMatrix
+import pickle
+import scipy.ndimage.filters as filter
+import scipy.signal as scisig
 
 
 class NoConvergenceError(Exception):
@@ -89,7 +92,7 @@ class HSMMModel(object):
 
         if startprob is None:
             startprob = np.full(self.n_states, 1.0 / self.n_states)
-        self._startprob = startprob
+        self._startprob = np.array(startprob)
 
     def decode(self, obs):
         """ Find most likely internal states for a sequence of observations.
@@ -178,7 +181,8 @@ class HSMMModel(object):
 
         return observations, states
 
-    def fit(self, obs, max_iter=20, atol=1e-5, censoring=True):
+    def fit(self, obs, max_iter=20, atol=1e-5, censoring=True, debug=True,
+            smooth="gaussian", update_rate=0.7, control_update=True):
         """ Fit the parameters of a HSMM to a given sequence of observations.
 
         This method runs the expectation-maximization algorithm to adjust the
@@ -235,12 +239,18 @@ class HSMMModel(object):
         # TODO Make startprob into a property like the rest.
 
         for step in range(1, max_iter + 1):
+            tmp_tmat = self.tmat.copy()
+            tmp_durations = self.durations.copy()
+            tmp_emissions = self.emissions.copy()
+            tmp_startprob = self._startprob.copy()
+
             durations_flat = self._durations_flat.copy()
             tmat_flat = self._tmat_flat.copy()
             startprob = self._startprob.copy()
             likelihoods = self.emissions.likelihood(obs)
 
             likelihoods[likelihoods < 1e-12] = 1e-12
+
 
             err = _fb_impl(
                 censoring, tau, j, m,
@@ -279,6 +289,22 @@ class HSMMModel(object):
                 denominator += l[:, -1]
             new_durations = eta / denominator[:, np.newaxis]
 
+            # Smooth Durations distribution
+            if smooth == "gaussian":
+                for i in range(new_durations.shape[0]):
+                    new_durations[i, :] = filter.gaussian_filter1d(
+                        new_durations[i, :], 20)
+                    new_durations[i, :] /= np.sum(new_durations[i, :])
+            elif smooth == "savitzky":
+                new_durations = scisig.savgol_filter(new_durations, 21, 9,
+                                                     axis=1)
+                new_durations /= np.sum(new_durations, axis=1)
+
+            if debug and step in [1, 2, 6, 11, 16, 20]:
+                pickle.dump(self.durations,
+                            open("duration_it%d.pkl" % (step), 'wb'))
+
+
             # Re-estimate emissions
             self.emissions.reestimate(l, obs)
 
@@ -286,6 +312,20 @@ class HSMMModel(object):
             self.tmat = new_tmat
             self.durations = new_durations
             self._startprob = new_pi
+
+            if control_update:
+                # Control update steps
+                change_of_emissions = self.emissions._probabilities - \
+                                      tmp_emissions._probabilities
+                change_of_tmat = self.tmat - tmp_tmat
+                change_of_durations = self.durations - tmp_durations
+                change_of_startprob = self._startprob - tmp_startprob
+
+                self.emissions._update(
+                    tmp_emissions._probabilities + change_of_emissions * update_rate)
+                self.tmat = tmp_tmat + change_of_tmat * update_rate
+                self.durations = tmp_durations + change_of_durations * update_rate
+                self._startprob = tmp_startprob + change_of_startprob * update_rate
 
         if err != 0:
             # An error occurred.
