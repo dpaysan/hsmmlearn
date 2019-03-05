@@ -145,6 +145,7 @@ class HSMMModel(object):
             Random sample of observations and internal states.
 
         """
+
         state = np.random.choice(self.n_states, p=self._startprob)
         duration = np.random.choice(
             self.n_durations, p=self._durations[state]) + 1
@@ -176,6 +177,57 @@ class HSMMModel(object):
         for state in range(self.n_states):
             state_mask = states == state
             observations[state_mask] = self.emissions.sample_for_state(
+                state, size=state_mask.sum(),
+            )
+
+        return observations, states
+
+    def sample_multivariate(self, n_observables, n_samples=1):
+        """ Generate a random sample from the HSMM.
+
+        Parameters
+        ----------
+        n_samples : int
+             Number of samples to generate.
+
+        Returns
+        -------
+        observations, states : numpy.ndarray, shape=(n_samples, n_observables)
+            Random sample of observations and internal states.
+
+        """
+        state = np.random.choice(self.n_states, p=self._startprob)
+        duration = np.random.choice(
+            self.n_durations, p=self._durations[state]) + 1
+
+        if n_samples == 1:
+            obs = self.emissions.sample_for_state(state)
+            return obs, state
+
+        states = np.empty(n_samples, dtype=int)
+        observations = np.empty((n_samples, n_observables),
+                                dtype=self.emissions.dtype)
+
+        # Generate states array.
+        state_idx = 0
+        while state_idx < n_samples:
+            # Adjust for right censoring (the last state may still be going on
+            # when we reach the limit on the number of samples to generate).
+            if state_idx + duration > n_samples:
+                duration = n_samples - state_idx
+
+            states[state_idx:state_idx + duration] = state
+            state_idx += duration
+
+            state = np.random.choice(self.n_states, p=self._tmat[state])
+            duration = np.random.choice(
+                self.n_durations, p=self._durations[state]
+            ) + 1
+
+        # Generate observations.
+        for state in range(self.n_states):
+            state_mask = states == state
+            observations[state_mask, :] = self.emissions.sample_for_state(
                 state, size=state_mask.sum(),
             )
 
