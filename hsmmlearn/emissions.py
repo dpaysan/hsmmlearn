@@ -2,6 +2,7 @@ from abc import ABCMeta, abstractmethod
 
 import numpy as np
 from scipy.stats import norm
+from scipy.stats import multivariate_normal
 
 from .utils import NonParametricDistribution
 
@@ -139,7 +140,7 @@ class MultinomialEmissions(AbstractEmissions):
         for em in range(self._probabilities.shape[1]):
             mask = observations == em
             new_emissions[:, em] = (
-                gamma[:, mask].sum(axis=1) / gamma.sum(axis=1)
+                    gamma[:, mask].sum(axis=1) / gamma.sum(axis=1)
             )
         self._update(new_emissions)
 
@@ -181,9 +182,73 @@ class GaussianEmissions(AbstractEmissions):
         new_means = p / q
 
         A = observations[np.newaxis, :] - new_means[:, np.newaxis]
-        p = np.sum(gamma * A**2, axis=1)
+        p = np.sum(gamma * A ** 2, axis=1)
         variances = p / q
         new_scales = np.sqrt(variances)
 
         self.means = new_means
         self.scales = new_scales
+
+
+class MultivariateGaussianEmissions(AbstractEmissions):
+    dtype = np.float64
+
+    """
+    Arguments:
+
+    means (np.array): n_states*n_observables array
+    scales (np.array): n_states*n_observables array, where scales_ij = standard
+                       error of observable j in state i.
+    """
+
+    def __init__(self, means, cov_list):
+        self._update(np.array(means), np.array(cov_list))
+
+    def _update(self, means, cov_list):
+        self.means = means
+        non_pos = cov_list < 0
+        cov_list[non_pos] = 0
+        self.cov_list = cov_list
+
+        state_codes = np.arange(self.means.shape[0])
+        self.state_distributions = [
+            multivariate_normal(mean=self.means[state, :],
+                                cov=self.cov_list[
+                                    state, :, :]) for state
+            in state_codes]
+
+    def likelihood(self, obs):
+        # Todo correlated observables so far uncorrelated only
+        return np.vstack(
+            [state_rv.pdf(obs) for state_rv in self.state_distributions])
+
+    def sample_for_state(self, state, size=None):
+        return multivariate_normal.rvs(self.means[state, :],
+                                       self.cov_list[state, :, :], size)
+
+    def copy(self):
+        return MultivariateGaussianEmissions(self.means.copy(),
+                                             self.cov_list.copy())
+
+    def reestimate(self, gamma, observations):
+        """
+        :param gamma: P(s|O_{1:i})
+        :param observations: (np.array: (n_obs,n_observables)
+        """
+        n_states, n_obs = gamma.shape
+
+        p = np.dot(gamma, observations)
+        q = np.sum(gamma, axis=1)
+        new_mean = p / q
+
+        cov_list = []
+        for s in range(n_states):
+            p = 0
+            q = 0
+            for i in range(n_obs):
+                dev = observations[i, :] - new_mean
+                p += gamma[s, i] * np.matmul(dev, dev.transpose())
+                q += gamma[s, i]
+            cov_list.append(p / q)
+
+        self._update(np.array(new_mean), np.array(cov_list))

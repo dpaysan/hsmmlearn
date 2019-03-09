@@ -1,7 +1,7 @@
 import numpy as np
-
 from .base import _viterbi_impl, _fb_impl
-from .emissions import GaussianEmissions, MultinomialEmissions
+from .emissions import GaussianEmissions, MultinomialEmissions, \
+    MultivariateGaussianEmissions
 from .properties import Durations, Emissions, TransitionMatrix
 import pickle
 import scipy.ndimage.filters as filter
@@ -165,7 +165,7 @@ class HSMMModel(object):
             if state_idx + duration > n_samples:
                 duration = n_samples - state_idx
 
-            states[state_idx:state_idx+duration] = state
+            states[state_idx:state_idx + duration] = state
             state_idx += duration
 
             state = np.random.choice(self.n_states, p=self._tmat[state])
@@ -303,7 +303,6 @@ class HSMMModel(object):
 
             likelihoods[likelihoods < 1e-12] = 1e-12
 
-
             err = _fb_impl(
                 censoring, tau, j, m,
                 durations_flat, tmat_flat, startprob,
@@ -356,7 +355,6 @@ class HSMMModel(object):
                 pickle.dump(self.durations,
                             open("duration_it%d.pkl" % (step), 'wb'))
 
-
             # Re-estimate emissions
             self.emissions.reestimate(l, obs)
 
@@ -396,12 +394,27 @@ class HSMMModel(object):
 # TODO the convenience wrappers should allow for the distribution parameters to
 # be updated...
 
+class MultivariateGaussianHSMM(HSMMModel):
+    """
+    A HSMM class with multivariate Gaussian emissions.
+    """
+
+    def __init__(self, means, scales, durations, tmat, startprob=None,
+                 support_cutoff=200):
+        emissions = MultivariateGaussianEmissions(means, scales)
+        super(MultivariateGaussianHSMM, self).__init__(emissions=emissions,
+                                                       durations=durations,
+                                                       tmat=tmat,
+                                                       startprob=startprob,
+                                                       support_cutoff=support_cutoff)
+
+
 class GaussianHSMM(HSMMModel):
     """ A HSMM class with Gaussian emissions.
     """
+
     def __init__(self, means, scales, durations, tmat,
                  startprob=None, support_cutoff=100):
-
         emissions = GaussianEmissions(means, scales)
         super(GaussianHSMM, self).__init__(
             emissions, durations, tmat,
@@ -428,9 +441,9 @@ class GaussianHSMM(HSMMModel):
 class MultinomialHSMM(HSMMModel):
     """ A HSMM class with discrete multinomial emissions.
     """
+
     def __init__(self, probabilities, durations, tmat,
                  startprob=None, support_cutoff=100):
-
         emissions = MultinomialEmissions(probabilities)
         super(MultinomialHSMM, self).__init__(
             emissions, durations, tmat,
