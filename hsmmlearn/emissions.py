@@ -206,8 +206,6 @@ class MultivariateGaussianEmissions(AbstractEmissions):
 
     def _update(self, means, cov_list):
         self.means = means
-        non_pos = cov_list < 0
-        cov_list[non_pos] = 0
         self.cov_list = cov_list
 
         state_codes = np.arange(self.means.shape[0])
@@ -237,16 +235,27 @@ class MultivariateGaussianEmissions(AbstractEmissions):
         """
         n_states, n_obs = gamma.shape
 
-        p = np.dot(gamma, observations)
-        q = np.sum(gamma, axis=1)
-        new_mean = p / q
+        new_mean = []
+        for s in range(n_states):
+            p = 0
+            q = 0
+            for i in range(n_obs):
+                p += gamma[s, i] * observations[i, :]
+                q += gamma[s, i]
+            new_mean.append(p / q)
+        new_mean = np.array(new_mean)
+
+        # p = np.dot(gamma, observations)
+        # q = np.sum(gamma, axis=1)
+        # new_mean = p / q
 
         cov_list = []
         for s in range(n_states):
             p = 0
             q = 0
             for i in range(n_obs):
-                dev = observations[i, :] - new_mean
+                dev = observations[i, :] - new_mean[s]
+                dev = dev.reshape((3,1))
                 p += gamma[s, i] * np.matmul(dev, dev.transpose())
                 q += gamma[s, i]
             cov_list.append(p / q)
