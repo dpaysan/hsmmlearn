@@ -234,7 +234,7 @@ class HSMMModel(object):
         return observations, states
 
     def fit(self, obs, max_iter=20, atol=1e-5, censoring=True, debug=True,
-            smooth="gaussian", update_rate=0.7, control_update=True):
+            smooth="gaussian", update_rate=0.7, control_update=False):
         """ Fit the parameters of a HSMM to a given sequence of observations.
 
         This method runs the expectation-maximization algorithm to adjust the
@@ -312,6 +312,9 @@ class HSMMModel(object):
             )
             if err != 0:
                 break
+            # print('l:', l)
+            # print('l1:', l1)
+
 
             # Calculate log likelihood
             new_llh = np.log(n).sum()
@@ -335,6 +338,7 @@ class HSMMModel(object):
                     new_tmat[i, k] = z / r
 
             # Re-estimate durations
+            #print('eta: ', eta)
             denominator = l1[:, :-1].sum(axis=1)
             if censoring:
                 denominator += l[:, -1]
@@ -352,8 +356,11 @@ class HSMMModel(object):
                 new_durations /= np.sum(new_durations, axis=1)
 
             if debug and step in [1, 2, 6, 11, 16, 20]:
-                pickle.dump(self.durations,
-                            open("duration_it%d.pkl" % (step), 'wb'))
+                try:
+                    pickle.dump(self.durations,
+                                open("Debug/duration_it%d.pkl" % (step), 'wb'))
+                except:
+                    pass
 
             # Re-estimate emissions
             self.emissions.reestimate(l, obs)
@@ -399,9 +406,25 @@ class MultivariateGaussianHSMM(HSMMModel):
     A HSMM class with multivariate Gaussian emissions.
     """
 
-    def __init__(self, means, scales, durations, tmat, startprob=None,
+    @property
+    def means(self):
+        return self.emissions.means
+
+    @means.setter
+    def means(self, value):
+        self.emissions.means = value
+
+    @property
+    def cov_list(self):
+        return self.emissions.cov_list
+
+    @cov_list.setter
+    def cov_list(self, value):
+        self.emissions.cov_list = value
+
+    def __init__(self, means, cov_list, durations, tmat, startprob=None,
                  support_cutoff=200):
-        emissions = MultivariateGaussianEmissions(means, scales)
+        emissions = MultivariateGaussianEmissions(means, cov_list)
         super(MultivariateGaussianHSMM, self).__init__(emissions=emissions,
                                                        durations=durations,
                                                        tmat=tmat,

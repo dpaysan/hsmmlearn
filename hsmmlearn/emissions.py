@@ -204,21 +204,34 @@ class MultivariateGaussianEmissions(AbstractEmissions):
     def __init__(self, means, cov_list):
         self._update(np.array(means), np.array(cov_list))
 
-    def _update(self, means, cov_list):
+    def _update(self, means, cov_list, epsilon=1e-5):
+        """
+
+        :param means: ndarray (n_states,n_obs)
+        :param cov_list: ndarray (n_states, n_obs, n_obs)
+        :param epsilon: constant added to diagnol to ensure covariance matrices
+                        to be psd if no variation of certain observables
+        """
         self.means = means
         self.cov_list = cov_list
-
-        state_codes = np.arange(self.means.shape[0])
+        n_states, n_obs = self.means.shape
+        state_codes = np.arange(n_states)
         self.state_distributions = [
             multivariate_normal(mean=self.means[state, :],
-                                cov=self.cov_list[
+                                cov=np.identity(
+                                    n_obs) * epsilon + self.cov_list[
                                     state, :, :]) for state
             in state_codes]
 
     def likelihood(self, obs):
         # Todo correlated observables so far uncorrelated only
-        return np.vstack(
-            [state_rv.pdf(obs) for state_rv in self.state_distributions])
+        # return np.vstack(
+        #    [state_rv.pdf(obs) for state_rv in self.state_distributions])
+
+        likelihood = []
+        for state_rv in self.state_distributions:
+            likelihood.append(state_rv.pdf(obs))
+        return np.array(likelihood)
 
     def sample_for_state(self, state, size=None):
         return multivariate_normal.rvs(self.means[state, :],
@@ -234,6 +247,7 @@ class MultivariateGaussianEmissions(AbstractEmissions):
         :param observations: (np.array: (n_obs,n_observables)
         """
         n_states, n_obs = gamma.shape
+        n_observables = observations.shape[1]
 
         new_mean = []
         for s in range(n_states):
@@ -255,7 +269,7 @@ class MultivariateGaussianEmissions(AbstractEmissions):
             q = 0
             for i in range(n_obs):
                 dev = observations[i, :] - new_mean[s]
-                dev = dev.reshape((3,1))
+                dev = dev.reshape((n_observables, 1))
                 p += gamma[s, i] * np.matmul(dev, dev.transpose())
                 q += gamma[s, i]
             cov_list.append(p / q)
