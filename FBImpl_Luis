@@ -20,8 +20,8 @@ using namespace std;
 
 
 
-double** StateIn = NULL;
-double** F = NULL;
+double** StateIn = NULL;    // transition probabilities
+double** F = NULL;          // forward quantities
 double** L = NULL;
 double** G = NULL;
 double*** H = NULL;
@@ -29,16 +29,16 @@ double** L1 = NULL;
 double* N = NULL;
 double** Norm = NULL;
 double** d = NULL;
-double** D = NULL;
-double* mean_d = NULL;
+double** D = NULL;      // duration distribution
+double* mean_d = NULL;  // mena durations
 double** p = NULL;
-double* pi = NULL;
+double* pi = NULL;      // initial state distribution
 double** eta = NULL;
 double** xi = NULL;
 double** alpha = NULL;
 int** maxI = NULL;
 int** maxU = NULL;
-double** pdf = NULL;
+double** pdf = NULL;    // emission duration
 int* hiddenStates = NULL;
 
 
@@ -59,92 +59,93 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
     ofstream output_file;
     output_file.open("debug.txt");
     output_file << "Running FB" << endl;
-    
+
     try {
         InitParaAndVar(CensoringPara, tauPara, JPara, MPara, dPara, pPara, piPara, pdfPara);
 
         CalcStoreD();
-	
+
         // forward recursion
 	for (t = 0; t <= tau - 1; t++)
 	  {
 	    N[t] = 0;
 	    for (j = 0; j <= J-1; j++)
 	      {
-		F[j][t] = 0;
-		Observ = pdf[j][t];
+		    F[j][t] = 0;                //
+		    Observ = pdf[j][t];         // get emission likelihoods
 
-		if (t < tau - 1)
-		  {
-		    for (u = 1; u <= min(t+1, M); u++) // TODO Fix upper limit !?
-		      {
-			if (u < t+1)
-			  {
-			    F[j][t] += Observ * d[j][u] * StateIn[j][t-u+1];
-			    N[t] += Observ * D[j][u] * StateIn[j][t-u+1];
-			    Observ *= pdf[j][t-u] / N[t-u];
-			  }
-			else // (u = t+1)
-			  {
-			    F[j][t] += Observ * d[j][t+1] * pi[j];
-			    N[t] += Observ * D[j][t+1] * pi[j];
-			  }
-		      }
-		  }
-		else // (t = tau - 1)
-		  {
-		    for (u = 1; u <= min(tau, M); u++) // TODO Fix upper limit !?
-		      {
-			if (u < tau)
-			  {
-			    F[j][tau-1] += Observ * D[j][u] * StateIn[j][tau-u];
-			    Observ *= pdf[j][tau-1-u] / N[tau-1-u];
-			  }
-			else // (u = tau)
-			  {
-			    F[j][tau-1] += Observ * D[j][tau] * pi[j];
-			  }
-		      }
-		    N[tau-1] += F[j][tau];
-		  }
-		if (F[j][t] <= 0)
-		  {
-		    output_file << "F[j][t] <= 0, namely " << F[j][t] << "for j = " << j << ", t = " << t << endl;
-		    throw var_nonpositive_exception();
-		  }
-	      }
-	    for (j = 0; j <= J-1; j++)
-	      {
-		if (N[t] <= 0)
-		  {
-		    throw var_nonpositive_exception();
-		  }
-		F[j][t] /= N[t];
-	      }
-	    if (t < tau - 1)
-	      {
-		for (j = 0; j <= J-1; j++)
-		  {
-		    StateIn[j][t+1] = 0;
-		    for (i = 0; i <= J-1; i++)
-		      {
-			StateIn[j][t+1] += p[i][j] * F[i][t];
-		      }
-		  }
-	      }
-	  }
+		    if (t < tau - 1)
+		        {
+		            for (u = 1; u <= min(t+1, M); u++) // TODO Fix upper limit !?
+		            {
+			            if (u < t+1)
+			            {
+			                F[j][t] += Observ * d[j][u] * StateIn[j][t-u+1];
+			                N[t] += Observ * D[j][u] * StateIn[j][t-u+1];
+			                Observ *= pdf[j][t-u] / N[t-u];
+			             }
+			            else // (u = t+1)
+			            {
+			                F[j][t] += Observ * d[j][t+1] * pi[j];
+			                N[t] += Observ * D[j][t+1] * pi[j];
+			            }
+		            }
+		        }
+		        else // (t = tau - 1)
+		        {
+		            for (u = 1; u <= min(tau, M); u++) // TODO Fix upper limit !?
+		            {
+			            if (u < tau)
+			            {
+			                F[j][tau-1] += Observ * D[j][u] * StateIn[j][tau-u];
+			                Observ *= pdf[j][tau-1-u] / N[tau-1-u];
+			            }
+			            else // (u = tau)
+			            {
+			                F[j][tau-1] += Observ * D[j][tau] * pi[j];
+			            }
+		            }
+		                N[tau-1] += F[j][tau];
+		        }
+		        if (F[j][t] <= 0)
+		        {
+		            output_file << "F[j][t] <= 0, namely " << F[j][t] << "for j = " << j << ", t = " << t << endl;
+		            throw var_nonpositive_exception();
+		        }
+	        }
+	        for (j = 0; j <= J-1; j++)
+	        {
+		        if (N[t] <= 0)
+		        {
+		            output_file << "N[t] <= 0, namely " << N[t] << "for t = " << t << endl;
+		            throw var_nonpositive_exception();
+		        }
+		        F[j][t] /= N[t];
+	        }
+	        if (t < tau - 1)
+	        {
+		        for (j = 0; j <= J-1; j++)
+		        {
+		            StateIn[j][t+1] = 0;
+		            for (i = 0; i <= J-1; i++)
+		                {
+			                StateIn[j][t+1] += p[i][j] * F[i][t];
+		                }
+		        }
+	        }
+	    }
 
-	output_file << "Now running backward recursion" << endl;
+	    output_file << "Now running backward recursion" << endl;
         // Backward recursion
         for (j = 0; j <= J - 1; j++)
-	  {
+	    {
             L[j][tau - 1] = F[j][tau - 1];
-	  }
+	    }
 
         for (t = tau - 2; t >= 0; t--)
-	  {
+	    {
             for (j = 0; j <= J - 1; j++)
-	      {
+	        {
                 G[j][t + 1] = 0;
 
                 Observ = 1;
@@ -153,36 +154,36 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
                     Observ *= pdf[j][t + u] / N[t + u];
 
                     if (u < tau - 1 - t)
-		      {
+		            {
                         H[j][t + 1][u] = L1[j][t + u] * Observ * d[j][u] / F[j][t + u];
-		      }
+		            }
                     else
-		      {
+		            {
                         H[j][t + 1][u] = Observ * D[j][tau - 1 - t];
-		      }
-                    G[j][t + 1] += H[j][t + 1][u];
-                }
-	      }
-	    
+		            }
+                        G[j][t + 1] += H[j][t + 1][u];
+                    }
+	        }
+
             for (j = 0; j <= J - 1; j++)
-	      {
+	        {
                 L1[j][t] = 0;
                 for (k = 0; k <= J - 1; k++)
-		  {
+		        {
                     L1[j][t] += G[k][t + 1] * p[j][k];
-		  }
+		        }
                 L1[j][t] *= F[j][t];
                 L[j][t] = L1[j][t] + L[j][t + 1] - G[j][t + 1] * StateIn[j][t + 1];
-	      }
-	  }
+	        }
+	    }
 
         // Calculation of eta and xi
-	output_file << "Calculating xi and eta" << endl;
+	    output_file << "Calculating xi and eta" << endl;
         if (LeftCensoring)
-	  {
+	    {
 	    // Calculation eta
-	    output_file << "Left censoring" << endl;
-	    output_file << "Calculating eta" << endl;
+	        output_file << "Left censoring" << endl;
+	        output_file << "Calculating eta" << endl;
             for (j = 0; j <= J - 1; j++)
             {
                 for (u = 1; u <= M; u++)
@@ -208,7 +209,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
             }
 
             // Calculation xi
-	    output_file << "Calculating xi" << endl;
+	        output_file << "Calculating xi" << endl;
             for (j = 0; j <= J - 1; j++)
             {
                 for (u = 1; u <= M; u++)
@@ -236,8 +237,8 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
         else
         {
             // Calculation eta
-	  output_file << "No left censoring" << endl;
-	  output_file << "Calculating eta" << endl;
+	        output_file << "No left censoring" << endl;
+	        output_file << "Calculating eta" << endl;
             for (j = 0; j <= J - 1; j++)
             {
                 for (u = 1; u <= M; u++)
@@ -279,7 +280,7 @@ void FBImpl(int CensoringPara, int tauPara, int JPara, int MPara,
             }
         }
 
-	output_file << "Saving parameters" << endl;
+	    output_file << "Saving parameters" << endl;
         // Save parameters
         for (j = 0; j <= J - 1; j++) {
             for (t = 0; t < tau; t++) {
