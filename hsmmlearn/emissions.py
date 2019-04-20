@@ -125,6 +125,11 @@ class MultinomialEmissions(AbstractEmissions):
         self._probabilities = _probabilities
         self._probability_rvs = _probability_rvs
 
+    def weighted_update(self, update_rate, old_multinormal_emissions):
+        new_probabilities = update_rate * self._probabilities + (
+                    1 - update_rate) * old_multinormal_emissions._probabilities
+        self._update(new_probabilities)
+
     def likelihood(self, obs):
         obs = np.squeeze(obs)
         return np.vstack([rv.pmf(obs) for rv in self._probability_rvs])
@@ -161,6 +166,12 @@ class GaussianEmissions(AbstractEmissions):
     def __init__(self, means, scales):
         self.means = means
         self.scales = scales
+
+    def weighted_update(self, update_rate, old_gaussian_emissions):
+        self.means = update_rate * self.means + (
+                    1 - update_rate) * old_gaussian_emissions.means
+        self.scales = update_rate * self.scales + (
+                    1 - update_rate) * old_gaussian_emissions.scales
 
     def likelihood(self, obs):
         obs = np.squeeze(obs)
@@ -202,9 +213,9 @@ class MultivariateGaussianEmissions(AbstractEmissions):
     """
 
     def __init__(self, means, cov_list):
-        self._update(np.array(means), np.array(cov_list))
+        self._update(np.array(means), np.array(cov_list), init_cov=True)
 
-    def _update(self, means, cov_list, epsilon=1e-5):
+    def _update(self, means, cov_list, init_cov=False, epsilon=1e-5):
         """
 
         :param means: ndarray (n_states,n_obs)
@@ -216,12 +227,27 @@ class MultivariateGaussianEmissions(AbstractEmissions):
         self.cov_list = cov_list
         n_states, n_obs = self.means.shape
         state_codes = np.arange(n_states)
-        self.state_distributions = [
-            multivariate_normal(mean=self.means[state, :],
-                                cov=np.identity(
-                                    n_obs) * epsilon + self.cov_list[
-                                    state, :, :]) for state
-            in state_codes]
+        if init_cov:
+            self.state_distributions = [
+                multivariate_normal(mean=self.means[state, :],
+                                    cov=np.identity(
+                                        n_obs) * epsilon + self.cov_list[
+                                                           state, :, :],
+                                    allow_singular=False) for
+                state
+                in state_codes]
+        else:
+            self.state_distributions = [
+                multivariate_normal(mean=self.means[state, :],
+                                    cov=self.cov_list[
+                                        state, :, :], allow_singular=True) for
+                state in state_codes]
+
+    def weighted_update(self, update_rate, old_mv_gaussian_emissions):
+        self.means = self.means * update_rate + (
+                    1 - update_rate) * old_mv_gaussian_emissions.means
+        self.cov_list = self.cov_list * update_rate + (
+                    1 - update_rate) * old_mv_gaussian_emissions.cov_list
 
     def likelihood(self, obs):
         # Todo correlated observables so far uncorrelated only
@@ -251,9 +277,12 @@ class MultivariateGaussianEmissions(AbstractEmissions):
 
         new_mean = []
         for s in range(n_states):
-            p = 0
+            p = np.zeros(n_observables)
             q = 0
+            n_coag = 0
             for i in range(n_obs):
+                if observations[i, 2] == 1:
+                    n_coag += 1
                 p += gamma[s, i] * observations[i, :]
                 q += gamma[s, i]
             new_mean.append(p / q)

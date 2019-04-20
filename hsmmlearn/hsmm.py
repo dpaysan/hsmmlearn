@@ -233,8 +233,8 @@ class HSMMModel(object):
 
         return observations, states
 
-    def fit(self, obs, max_iter=20, atol=1e-5, censoring=True, debug=True,
-            smooth="gaussian", update_rate=0.7, control_update=False):
+    def fit(self, obs, max_iter=200, atol=1e-5, censoring=True, debug=True,
+            smooth="gaussian", update_rate=0.001, control_update=True):
         """ Fit the parameters of a HSMM to a given sequence of observations.
 
         This method runs the expectation-maximization algorithm to adjust the
@@ -372,17 +372,13 @@ class HSMMModel(object):
 
             if control_update:
                 # Control update steps
-                change_of_emissions = self.emissions._probabilities - \
-                                      tmp_emissions._probabilities
-                change_of_tmat = self.tmat - tmp_tmat
-                change_of_durations = self.durations - tmp_durations
-                change_of_startprob = self._startprob - tmp_startprob
-
-                self.emissions._update(
-                    tmp_emissions._probabilities + change_of_emissions * update_rate)
-                self.tmat = tmp_tmat + change_of_tmat * update_rate
-                self.durations = tmp_durations + change_of_durations * update_rate
-                self._startprob = tmp_startprob + change_of_startprob * update_rate
+                self.tmat = update_rate * self.tmat + (
+                        1 - update_rate) * tmp_tmat
+                self.durations = update_rate * self.durations + (
+                        1 - update_rate) * tmp_durations
+                self._startprob = update_rate * self._startprob + (
+                        1 - update_rate) * tmp_startprob
+                self.emissions.weighted_update(update_rate, tmp_emissions)
 
         if err != 0:
             # An error occurred.
