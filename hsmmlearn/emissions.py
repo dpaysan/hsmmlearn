@@ -207,9 +207,12 @@ class MultivariateGaussianEmissions(AbstractEmissions):
     """
     Arguments:
 
-    means (np.array): n_states*n_observables array
-    scales (np.array): n_states*n_observables array, where scales_ij = standard
-                       error of observable j in state i.
+    means (list):    holds the mean-arrays for the n_states for the 
+                     n_observables
+                   
+    cov_list (list): holds n_states n_cont_observables*n_cont_observables 
+                     numpy arrays, defining the covariance matrix for each
+                     state.
     """
 
     def __init__(self, means, cov_list):
@@ -220,7 +223,7 @@ class MultivariateGaussianEmissions(AbstractEmissions):
 
         :param means: ndarray (n_states,n_obs)
         :param cov_list: ndarray (n_states, n_obs, n_obs)
-        :param epsilon: constant added to diagnol to ensure covariance matrices
+        :param epsilon: constant added to diagonal to ensure covariance matrices
                         to be psd if no variation of certain observables
         """
         self.means = means
@@ -304,3 +307,164 @@ class MultivariateGaussianEmissions(AbstractEmissions):
             cov_list.append(p / q)
 
         self._update(np.array(new_mean), np.array(cov_list))
+
+
+class GaussianMultinomialMixtureEmissions(AbstractEmissions):
+    dtype = np.float64
+
+    """
+    Arguments:
+    cont_mask (np.array): n_observables array masking the continuous 
+                          observables with ones and categorical with zeros
+                           
+    means (list): n_states*n_cont_observables array with the means for the 
+                      continuous observables
+                      
+    cov_list (list): holds n_states n_cont_observables*n_cont_observables 
+                     numpy arrays, defining the covariance for each state. 
+    
+    cat_probabilities (list): holds the emission probabilities of the
+                              n_cat_observables symbols for the n_states
+    """
+
+    def __init__(self, cont_mask, cat_probabilities, means, cov_list):
+        self._update(np.array(cont_mask), np.array(cat_probabilities),
+                     np.array(means), np.array(cov_list), init_cov=True)
+
+    def _update(self, cont_mask, cat_probabilities, means,
+                cov_list, init_cov=False, epsilon=1e-5):
+        """
+        Arguments:
+
+        cont_mask: ndarray (n_observables,)
+        cat_probabilities: ndarray (n_states, n_cat_obs)
+        means: ndarray (n_states,n_cont_obs)
+        cov_list: ndarray (n_states, n_obs, n_obs)
+        epsilon: constant added to diagonal to ensure covariance matrices
+                        to be psd if there exist invariant observables
+        """
+
+        self.cont_mask = cont_mask
+        self.means = means
+        self.cov_list = cov_list
+        n_states, n_obs = self.means.shape
+        n_cont_obs = np.sum(cont_mask)
+        n_cat_obs = len(cont_mask) - n_cont_obs
+        self.state_codes = np.arange(n_states)
+
+        if init_cov:
+            self.cont_state_distributions = [
+                multivariate_normal(mean=self.means[state, :],
+                                    cov=np.identity(n_obs) * epsilon +
+                                        self.cov_list[state, :, :],
+                                    allow_singular=False) for state
+                in self.state_codes]
+        else:
+            self.cont_state_distributions = [
+                multivariate_normal(mean=self.means[state, :],
+                                    cov=self.cov_list[
+                                        state, :, :], allow_singular=True) for
+                state in self.state_codes]
+
+        _probabilities = np.asarray(cat_probabilities)
+        # clip small neg residual (GH #34)
+        _probabilities[_probabilities < 0] = 0
+
+        xs = np.arange(_probabilities.shape[1])
+        _cat_rvs = [
+            NonParametricDistribution(xs, ps) for ps in _probabilities
+        ]
+        self.cat_probabilities = _probabilities
+        self.cat_state_distributions = _cat_rvs
+
+    def weighted_update(self, update_rate, old_mixture_emissions):
+        means = self.means * update_rate + (
+                1 - update_rate) * old_mixture_emissions.means
+        cov_list = self.cov_list * update_rate + (
+                1 - update_rate) * old_mixture_emissions.cov_list
+        cat_probabilities = self.cat_probabilities * update_rate + \
+                            (1 - update_rate) * \
+                            old_mixture_emissions.cat_probabilities
+
+        # Ensure changes are taken over to the iced distributions
+        self._update(self.cont_mask, cat_probabilities, means, cov_list)
+
+    def likelihood(self, obs):
+        # Todo correlated observables so far uncorrelated only
+
+        cont_likelihood = np.vstack([cont_state_rv.pdf(obs[:, self.cont_mask])
+                                     for cont_state_rv in
+                                     self.cont_state_distributions])
+        obs_cat = np.squeeze(np.array(obs[:, ~self.cont_mask], dtype=np.int64))
+        cat_likelihood = np.vstack([cat_state_rv.pmf(obs_cat)
+                                    for cat_state_rv in
+                                    self.cat_state_distributions])
+        # print(cat_likelihood)
+        return (cont_likelihood * cat_likelihood)
+
+    def sample_for_state(self, state, size=None):
+        n_obs = len(self.cont_mask)
+        obs = np.zeros((size, n_obs,))
+        obs_cont = multivariate_normal.rvs(self.means[state, :],
+                                           self.cov_list[state, :, :],
+                                           size=size)
+        obs[:, self.cont_mask] = obs_cont
+        obs_cat = self.cat_state_distributions[state].rvs(
+            size=size)
+        obs[:, ~self.cont_mask] = np.reshape(obs_cat, (size, 1))
+        return (obs)
+
+    def copy(self):
+        return GaussianMultinomialMixtureEmissions(self.cont_mask.copy(),
+                                                   self.cat_probabilities.copy(),
+                                                   self.means.copy(),
+                                                   self.cov_list.copy())
+
+    def reestimate(self, gamma, observations):
+        """
+        gamma: P(s|O_{1:i})
+        observations: (np.array: (n_obs,n_observables)
+        """
+        n_states, n_obs = gamma.shape
+        n_observables = observations.shape[1]
+        n_cont_observables = np.sum(self.cont_mask)
+        n_cat_observables = n_observables - n_cont_observables
+
+        new_mean = []
+        for s in range(n_states):
+            p = np.zeros(n_cont_observables)
+            q = 0
+            # n_coag = 0
+            for i in range(n_obs):
+                # if observations[i, 2] == 1:
+                # n_coag += 1
+                p += gamma[s, i] * observations[i, self.cont_mask]
+                q += gamma[s, i]
+            new_mean.append(p / q)
+        new_mean = np.array(new_mean)
+
+        # p = np.dot(gamma, observations)
+        # q = np.sum(gamma, axis=1)
+        # new_mean = p / q
+
+        cov_list = []
+        for s in range(n_states):
+            p = 0
+            q = 0
+            for i in range(n_obs):
+                dev = observations[i, self.cont_mask] - new_mean[s]
+                dev = dev.reshape((n_cont_observables, 1))
+                p += gamma[s, i] * np.matmul(dev, dev.transpose())
+                q += gamma[s, i]
+            cov_list.append(p / q)
+
+        new_emissions = np.empty_like(self.cat_probabilities)
+        for em in range(self.cat_probabilities.shape[1]):
+            mask = observations[:, ~self.cont_mask] == em
+            mask = np.squeeze(mask)
+            new_emissions[:, em] = (
+                    gamma[:, mask].sum(axis=1) / gamma.sum(axis=1)
+            )
+
+        self._update(np.array(self.cont_mask), np.array(new_emissions),
+                     np.array(new_mean), np.array(cov_list))

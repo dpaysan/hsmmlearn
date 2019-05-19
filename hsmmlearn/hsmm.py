@@ -1,7 +1,7 @@
 import numpy as np
 from .base import _viterbi_impl, _fb_impl
 from .emissions import GaussianEmissions, MultinomialEmissions, \
-    MultivariateGaussianEmissions
+    MultivariateGaussianEmissions, GaussianMultinomialMixtureEmissions
 from .properties import Durations, Emissions, TransitionMatrix
 import pickle
 import scipy.ndimage.filters as filter
@@ -234,7 +234,7 @@ class HSMMModel(object):
         return observations, states
 
     def fit(self, obs, max_iter=200, atol=1e-5, censoring=True, debug=True,
-            smooth="gaussian", update_rate=0.001, control_update=True):
+            smooth=None, update_rate=0.1, control_update=True):
         """ Fit the parameters of a HSMM to a given sequence of observations.
 
         This method runs the expectation-maximization algorithm to adjust the
@@ -468,3 +468,55 @@ class MultinomialHSMM(HSMMModel):
             emissions, durations, tmat,
             startprob=startprob, support_cutoff=support_cutoff
         )
+
+
+class GaussianMultinomialMixtureHSMM(HSMMModel):
+    """
+    A HSMM class with multivariate Gaussian emissions.
+    """
+
+    @property
+    def means(self):
+        return self.emissions.means
+
+    @means.setter
+    def means(self, value):
+        self.emissions.means = value
+
+    @property
+    def cov_list(self):
+        return self.emissions.cov_list
+
+    @cov_list.setter
+    def cov_list(self, value):
+        self.emissions.cov_list = value
+
+    @property
+    def cont_mask(self):
+        return self.emissions.cont_mask
+
+    @cont_mask.setter
+    def cont_mask(self, value):
+        self.emissions.cont_mask = value
+
+    @property
+    def cat_probabilities(self):
+        return self.emissions.cat_probabilities
+
+    @cat_probabilities.setter
+    def cat_probabilities(self, value):
+        self.emissions.cat_probabilities = value
+
+    def __init__(self, cont_mask, cat_probabilities, means, cov_list,
+                 durations,
+                 tmat, startprob=None,
+                 support_cutoff=200):
+        emissions = GaussianMultinomialMixtureEmissions(cont_mask,
+                                                        cat_probabilities,
+                                                        means, cov_list)
+        super(GaussianMultinomialMixtureHSMM, self).__init__(
+            emissions=emissions,
+            durations=durations,
+            tmat=tmat,
+            startprob=startprob,
+            support_cutoff=support_cutoff)
