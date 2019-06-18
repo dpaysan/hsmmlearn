@@ -6,6 +6,9 @@ from .properties import Durations, Emissions, TransitionMatrix
 import pickle
 import scipy.ndimage.filters as filter
 import scipy.signal as scisig
+import matplotlib.pyplot as plt
+import logging
+import traceback
 
 
 class NoConvergenceError(Exception):
@@ -324,6 +327,7 @@ class HSMMModel(object):
                 break
             llh = new_llh
 
+
             # Re-estimate pi
             new_pi = l[:, 0]
             new_pi[new_pi < 1e-14] = 1e-14
@@ -344,23 +348,6 @@ class HSMMModel(object):
                 denominator += l[:, -1]
             new_durations = eta / denominator[:, np.newaxis]
 
-            # Smooth Durations distribution
-            if smooth == "gaussian":
-                for i in range(new_durations.shape[0]):
-                    new_durations[i, :] = filter.gaussian_filter1d(
-                        new_durations[i, :], 20)
-                    new_durations[i, :] /= np.sum(new_durations[i, :])
-            elif smooth == "savitzky":
-                new_durations = scisig.savgol_filter(new_durations, 21, 9,
-                                                     axis=1)
-                new_durations /= np.sum(new_durations, axis=1)
-
-            if debug and step in [1, 2, 6, 11, 16, 20]:
-                try:
-                    pickle.dump(self.durations,
-                                open("Debug/duration_it%d.pkl" % (step), 'wb'))
-                except:
-                    pass
 
             # Re-estimate emissions
             self.emissions.reestimate(l, obs)
@@ -379,6 +366,52 @@ class HSMMModel(object):
                 self._startprob = update_rate * self._startprob + (
                         1 - update_rate) * tmp_startprob
                 self.emissions.weighted_update(update_rate, tmp_emissions)
+
+            # Smooth Durations distribution
+            if smooth == "gaussian":
+                for i in range(self.durations.shape[0]):
+                    self.durations[i, :] = filter.gaussian_filter1d(
+                        self.durations[i, :], 5)
+                    self.durations[i, :] /= np.sum(self.durations[i, :])
+            elif smooth == "savitzky":
+                self.durations = scisig.savgol_filter(self.durations, 21, 9,
+                                                      axis=1)
+                self.durations /= np.sum(self.durations, axis=1)
+
+        if debug and (has_converged or step == max_iter):
+            try:
+                fig, ax = plt.subplots()
+                im = ax.imshow(self.tmat)
+                ax.set_xticks(np.arange(len(self.states)))
+                ax.set_yticks(np.arange(len(self.states)))
+                ax.set_xticklabels(self.states)
+                ax.set_yticklabels(self.states)
+
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+                         rotation_mode="anchor")
+                tmat_prt_version = np.round(self.tmat, decimals=2)
+                for i in range(self.n_states):
+                    for j in range(self.n_states):
+                        text = ax.text(j, i, tmat_prt_version[i, j],
+                                       ha="center", va="center", color="w")
+
+                ax.set_title("Fitted transition matrix ")
+                fig.tight_layout()
+                plt.savefig('./Debug/transition_matrix_fitted.png')
+
+                for state in range(self.n_states):
+                    title = "Duration distribution of state " + self.states[
+                        state]
+                    y = self.durations[:, :250]
+                    seq = np.arange(len(y[state]))
+                    fig, ax = plt.subplots()
+                    ax.plot(seq, y[state])
+                    ax.set_title(title)
+                    fig.tight_layout()
+                    plt.savefig('./Debug/durations_state_' + self.states[
+                        state] + '.png')
+            except Exception as e:
+                logging.error(traceback.format_exc())
 
         if err != 0:
             # An error occurred.
