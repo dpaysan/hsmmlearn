@@ -256,6 +256,12 @@ class HSMMModel(object):
             converged.
         censoring : bool
             Whether to apply right-censoring.
+        update_rate: float
+            Q-learning inspired update - the new quantities will be a weighted
+            average with update_rate * the MLE and 1-update_rate * the old
+            quantities
+        smooth: basestring {"gaussian", "savitzky", "None"}
+            smoother applied to the durations after the update
 
         Raises
         ------
