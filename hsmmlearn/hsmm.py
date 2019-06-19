@@ -237,7 +237,7 @@ class HSMMModel(object):
         return observations, states
 
     def fit(self, obs, max_iter=200, atol=1e-5, censoring=True, debug=True,
-            smooth=None, update_rate=0.1, control_update=True):
+            smooth=None, update_rate=1, control_update=True):
         """ Fit the parameters of a HSMM to a given sequence of observations.
 
         This method runs the expectation-maximization algorithm to adjust the
