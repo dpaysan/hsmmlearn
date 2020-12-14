@@ -1,5 +1,6 @@
 import numpy as np
-from .base import _viterbi_impl, _fb_impl
+from .base import _viterbi_impl
+from .base import _fb_impl
 from .emissions import GaussianEmissions, MultinomialEmissions, \
     MultivariateGaussianEmissions, GaussianMultinomialMixtureEmissions
 from .properties import Durations, Emissions, TransitionMatrix
@@ -9,6 +10,7 @@ import scipy.signal as scisig
 import matplotlib.pyplot as plt
 import logging
 import traceback
+from.utils import annotate_heatmap, heatmap
 
 
 class NoConvergenceError(Exception):
@@ -387,28 +389,22 @@ class HSMMModel(object):
         if debug and (has_converged or step == max_iter):
             try:
                 fig, ax = plt.subplots()
-                im = ax.imshow(self.tmat)
-                ax.set_xticks(np.arange(len(self.states)))
-                ax.set_yticks(np.arange(len(self.states)))
-                ax.set_xticklabels(self.states)
-                ax.set_yticklabels(self.states)
 
-                plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
-                         rotation_mode="anchor")
-                tmat_prt_version = np.round(self.tmat, decimals=2)
-                for i in range(self.n_states):
-                    for j in range(self.n_states):
-                        text = ax.text(j, i, tmat_prt_version[i, j],
-                                       ha="center", va="center", color="w")
+                im, cbar = heatmap(self.tmat, self.states, self.states, ax=ax,
+                                   cmap="Blues", cbarlabel="Transition probability")
+                texts = annotate_heatmap(im, valfmt="{x:.2f} ")
 
-                ax.set_title("Fitted transition matrix ")
                 fig.tight_layout()
                 plt.savefig('./Debug/transition_matrix_fitted.png')
 
                 for state in range(self.n_states):
+                    if state == 0:
+                        limit = 800
+                    else:
+                        limit = 250
                     title = "Duration distribution of state " + self.states[
                         state]
-                    y = self.durations[:, :250]
+                    y = self.durations[:, :limit]
                     seq = np.arange(len(y[state]))
                     fig, ax = plt.subplots()
                     ax.plot(seq, y[state])
@@ -429,6 +425,18 @@ class HSMMModel(object):
                 "The forward-backward algorithm encountered an internal error "
                 "after {} steps. Try reducing the `num_iter` parameter. "
                 "Log-likelihood procession: {}.".format(step, log_likelihoods))
+
+        title = "Log-Likelihood Convergence"
+        seq = np.arange(len(log_likelihoods))
+        y = np.array(log_likelihoods)
+
+        fig, ax = plt.subplots()
+        ax.plot(seq, y)
+        ax.set_title(title)
+        ax.set_xlabel('iterations')
+        ax.set_ylabel('Log-Likelihood')
+        plt.savefig('./Debug/LogLikelihood.png')
+
 
         return has_converged, llh
 

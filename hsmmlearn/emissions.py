@@ -127,7 +127,7 @@ class MultinomialEmissions(AbstractEmissions):
 
     def weighted_update(self, update_rate, old_multinormal_emissions):
         new_probabilities = update_rate * self._probabilities + (
-                    1 - update_rate) * old_multinormal_emissions._probabilities
+                1 - update_rate) * old_multinormal_emissions._probabilities
         self._update(new_probabilities)
 
     def likelihood(self, obs):
@@ -169,9 +169,9 @@ class GaussianEmissions(AbstractEmissions):
 
     def weighted_update(self, update_rate, old_gaussian_emissions):
         self.means = update_rate * self.means + (
-                    1 - update_rate) * old_gaussian_emissions.means
+                1 - update_rate) * old_gaussian_emissions.means
         self.scales = update_rate * self.scales + (
-                    1 - update_rate) * old_gaussian_emissions.scales
+                1 - update_rate) * old_gaussian_emissions.scales
 
     def likelihood(self, obs):
         obs = np.squeeze(obs)
@@ -231,36 +231,34 @@ class MultivariateGaussianEmissions(AbstractEmissions):
         n_states, n_obs = self.means.shape
         state_codes = np.arange(n_states)
         if init_cov:
+            for state in state_codes:
+                self.cov_list[state, :, :] = self.cov_list[state, :, :] + epsilon * np.identity(n_obs)
             self.state_distributions = [
                 multivariate_normal(mean=self.means[state, :],
-                                    cov=np.identity(
-                                        n_obs) * epsilon + self.cov_list[
-                                                           state, :, :],
-                                    allow_singular=False) for
-                state
-                in state_codes]
+                                    cov=self.cov_list[state, :, :],
+                                    allow_singular=False) for state in state_codes]
         else:
             self.state_distributions = [
                 multivariate_normal(mean=self.means[state, :],
                                     cov=self.cov_list[
-                                        state, :, :], allow_singular=True) for
+                                        state, :, :], allow_singular=False) for
                 state in state_codes]
 
     def weighted_update(self, update_rate, old_mv_gaussian_emissions):
         self.means = self.means * update_rate + (
-                    1 - update_rate) * old_mv_gaussian_emissions.means
+                1 - update_rate) * old_mv_gaussian_emissions.means
         self.cov_list = self.cov_list * update_rate + (
-                    1 - update_rate) * old_mv_gaussian_emissions.cov_list
+                1 - update_rate) * old_mv_gaussian_emissions.cov_list
 
     def likelihood(self, obs):
         # Todo correlated observables so far uncorrelated only
-        # return np.vstack(
-        #    [state_rv.pdf(obs) for state_rv in self.state_distributions])
+        return np.vstack(
+            [state_rv.pdf(obs) for state_rv in self.state_distributions])
 
-        likelihood = []
-        for state_rv in self.state_distributions:
-            likelihood.append(state_rv.pdf(obs))
-        return np.array(likelihood)
+    # likelihood = []
+    # for state_rv in self.state_distributions:
+    #    likelihood.append(state_rv.pdf(obs))
+    # return np.array(likelihood)
 
     def sample_for_state(self, state, size=None):
         return multivariate_normal.rvs(self.means[state, :],
@@ -282,10 +280,7 @@ class MultivariateGaussianEmissions(AbstractEmissions):
         for s in range(n_states):
             p = np.zeros(n_observables)
             q = 0
-            n_coag = 0
             for i in range(n_obs):
-                if observations[i, 2] == 1:
-                    n_coag += 1
                 p += gamma[s, i] * observations[i, :]
                 q += gamma[s, i]
             new_mean.append(p / q)
@@ -302,11 +297,11 @@ class MultivariateGaussianEmissions(AbstractEmissions):
             for i in range(n_obs):
                 dev = observations[i, :] - new_mean[s]
                 dev = dev.reshape((n_observables, 1))
-                p += gamma[s, i] * np.matmul(dev, dev.transpose())
+                p += gamma[s, i] * np.outer(dev, dev)
                 q += gamma[s, i]
             cov_list.append(p / q)
 
-        self._update(np.array(new_mean), np.array(cov_list))
+        self._update(np.array(new_mean), np.array(cov_list), init_cov=False)
 
 
 class GaussianMultinomialMixtureEmissions(AbstractEmissions):
